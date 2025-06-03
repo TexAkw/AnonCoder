@@ -1,0 +1,14 @@
+name: NER Proxy
+version: 0.0.1
+schema: v1
+models:
+  - name: NER WebSocket Proxy
+    provider: openai
+    apiBase: http://localhost:7002/v1 # Your proxy server URL
+    model: gpt-3.5-turbo
+    apiKey: "any-string"
+    roles:
+      - chat
+      - edit
+      - apply
+      - autocomplete
