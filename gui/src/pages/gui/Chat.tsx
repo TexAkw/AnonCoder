@@ -5,7 +5,7 @@ import {
 import { Editor, JSONContent } from "@tiptap/react";
 import { InputModifiers } from "core";
 import { streamResponse } from "core/llm/stream";
-import { renderChatMessage } from "core/util/messageContent";
+import { renderChatMessage, stripImages } from "core/util/messageContent";
 import { usePostHog } from "posthog-js/react";
 import {
   useCallback,
@@ -18,12 +18,14 @@ import {
 import { ErrorBoundary } from "react-error-boundary";
 import styled from "styled-components";
 import { Button, lightGray, vscBackground } from "../../components";
+import AnonymizationConfirmDialog from "../../components/dialogs/AnonymizationConfirmDialog";
 import FeedbackDialog from "../../components/dialogs/FeedbackDialog";
 import { useFindWidget } from "../../components/find/FindWidget";
 import TimelineItem from "../../components/gui/TimelineItem";
 import { NewSessionButton } from "../../components/mainInput/belowMainInput/NewSessionButton";
 import ThinkingBlockPeek from "../../components/mainInput/belowMainInput/ThinkingBlockPeek";
 import ContinueInputBox from "../../components/mainInput/ContinueInputBox";
+import { resolveEditorContent } from "../../components/mainInput/TipTapEditor";
 import { useOnboardingCard } from "../../components/OnboardingCard";
 import StepContainer from "../../components/StepContainer";
 import { TabBar } from "../../components/TabBar/TabBar";
@@ -48,7 +50,7 @@ import { cancelStream } from "../../redux/thunks/cancelStream";
 import { streamEditThunk } from "../../redux/thunks/edit";
 import { loadLastSession } from "../../redux/thunks/session";
 import { isJetBrains, isMetaEquivalentKeyPressed } from "../../util";
-
+import { anonymizationService } from "../../util/anonymization";
 import { getLocalStorage, setLocalStorage } from "../../util/localStorage";
 import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
@@ -155,7 +157,7 @@ export function Chat() {
   );
 
   const sendInput = useCallback(
-    (
+    async (
       editorState: JSONContent,
       modifiers: InputModifiers,
       index?: number,
@@ -184,6 +186,85 @@ export function Chat() {
 
       if (isInEdit && codeToEdit.length === 0) {
         return;
+      }
+
+      // NEW: Anonymization workflow
+      try {
+        // Extract text content from editor state
+        const [_, __, userInstructions, ___] = await resolveEditorContent({
+          editorState,
+          modifiers: {
+            noContext: true,
+            useCodebase: false,
+          },
+          ideMessenger,
+          defaultContextProviders: [],
+          availableSlashCommands: [],
+          dispatch,
+        });
+
+        const textContent = stripImages(userInstructions);
+
+        // Call anonymization service
+        const anonymizationResult =
+          await anonymizationService.anonymizeText(textContent);
+
+        // Show confirmation dialog
+        const confirmed = await new Promise<boolean>((resolve) => {
+          const handleConfirm = () => {
+            dispatch(setShowDialog(false));
+            resolve(true);
+          };
+
+          const handleCancel = () => {
+            dispatch(setShowDialog(false));
+            resolve(false);
+          };
+
+          dispatch(
+            setDialogMessage(
+              <AnonymizationConfirmDialog
+                anonymizationResult={anonymizationResult}
+                onConfirm={handleConfirm}
+                onCancel={handleCancel}
+              />,
+            ),
+          );
+          dispatch(setShowDialog(true));
+        });
+
+        if (!confirmed) {
+          return; // User cancelled
+        }
+
+        // If confirmed, create a new editor state with anonymized content
+        if (Object.keys(anonymizationResult.anonymizationMap).length > 0) {
+          // Create a new editor state with anonymized text
+          const anonymizedEditorState: JSONContent = {
+            type: "doc",
+            content: [
+              {
+                type: "paragraph",
+                content: [
+                  {
+                    type: "text",
+                    text: anonymizationResult.anonymizedText,
+                  },
+                ],
+              },
+            ],
+          };
+          editorState = anonymizedEditorState;
+        }
+      } catch (error) {
+        console.error("Anonymization failed:", error);
+        // Show error to user and optionally proceed without anonymization
+        const proceed = confirm(
+          "Anonymization service failed. Do you want to proceed without anonymization?",
+        );
+        if (!proceed) {
+          return;
+        }
       }
 
       // TODO - hook up with hub to detect free trial progress
@@ -250,6 +331,8 @@ export function Chat() {
       isInEdit,
       codeToEdit,
       toolCallState,
+      ideMessenger,
+      dispatch,
     ],
   );
 
