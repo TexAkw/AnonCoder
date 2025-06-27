@@ -8,10 +8,26 @@ import json
 import uvicorn
 import requests
 import re
-
+import os
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+import logging
+from dlp import DLP
+from contextlib import asynccontextmanager
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI()
+load_dotenv()
+
+data_dlp = {}
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    data_dlp["dlp"] = DLP()
+    yield
+    logging.info("Clearing DLP")
+    data_dlp.clear() 
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -121,17 +137,66 @@ def anonymize_text(text: str) -> tuple[str, Dict[str, str]]:
 
     return anonymized, anonymization_map
 
+def apply_ner(text: str) -> tuple[str, Dict[str, str]]:
+    """
+    Anonymize text by replacing PII with placeholders.
+    """
+    url = " https://api.akawan.net/v1/ner"
+    api_key = os.getenv("NER_API_KEY")
+    print(text)
+
+    headers = {
+        "apiKey": f"{api_key}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "flat_ner": True,
+        "text": text,
+        "labels": [
+            {
+            "label": "ORGANIZATION",
+            "threshold": 0.9
+            },
+            {
+            "label": "LOCATION",
+            "threshold": 0.8
+            }
+        ],
+        "multi_label": False,
+        "recognitions_defs": [
+            {
+            "label": "DATE",
+            "pattern": "\\d{4}-\\d{2}-\\d{2}"
+            }
+        ]
+    }
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200: 
+            return response.json()
+        else:
+            logger.error(f"Error from API: {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"Error from API: {str(e)}")
+        return None
+
 
 @app.post("/v1/anonymize", response_model=AnonymizeResponse)
 async def anonymize(request: AnonymizeRequest):
     """
     Anonymize text by replacing PII with placeholders.
     """
-    anonymized_text, anonymization_map = anonymize_text(request.text)
+    response = apply_ner(request.text)
+    print(response)
+    if response is None:
+        raise HTTPException(
+            status_code=500, detail="Error from API")
+    anonymized_text, anonymization_map = data_dlp["dlp"].apply_dlp(request.text, response)
 
     return AnonymizeResponse(
         original_text=request.text,
-        anonymized_text=anonymized_text,
+        anonymized_text=request.text,
         anonymization_map=anonymization_map
     )
 
@@ -141,7 +206,7 @@ async def chat_completion(request: ChatRequest):
     """
     OpenAI-compatible chat completion endpoint that forwards requests to the BoSL AI API.
     """
-    # Extract the last user message to send to Bosl.ai
+    # Extract the last user message to send to the model
     last_user_message = None
     for msg in reversed(request.messages):
         if msg.role == "user":
@@ -151,14 +216,26 @@ async def chat_completion(request: ChatRequest):
     if not last_user_message:
         raise HTTPException(
             status_code=400, detail="No user message found in the request")
-
     # Count token estimates for logging
     prompt_tokens = sum(len(msg.content.split()) for msg in request.messages)
+    logger.info(f"messages: {request.messages}")
 
     try:
         print(last_user_message)
+        dlp = data_dlp["dlp"]
+        response = apply_ner(last_user_message)
+        print("================ RESPONSE ==================")
+        print(response)
+        if response is None:
+            raise HTTPException(
+                status_code=500, detail="Error from API")
+        anonymized_text, anonymization_map = data_dlp["dlp"].apply_dlp(last_user_message, response)
+        print("================ ANONYMIZED TEXT ==================")
+        print(anonymized_text)
 
-        final_response = "test"
+        final_response = dlp.deanonymize(last_user_message)
+        print("================ FINAL RESPONSE ==================")
+        print(final_response)
         completion_tokens = len(final_response.split()) // 4
 
         # Handle streaming if requested
@@ -171,7 +248,7 @@ async def chat_completion(request: ChatRequest):
                     "model": request.model,
                     "choices": [
                         {
-                            "delta": {"role": "assistant", "content": final_response},
+                            "delta": {"role": "assistant", "content": anonymized_text},
                             "index": 0,
                             "finish_reason": None
                         }
