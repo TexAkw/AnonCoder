@@ -18,17 +18,17 @@ import {
 import { ErrorBoundary } from "react-error-boundary";
 import styled from "styled-components";
 import { Button, lightGray, vscBackground } from "../../components";
+import { useOnboardingCard } from "../../components/OnboardingCard";
+import StepContainer from "../../components/StepContainer";
+import { TabBar } from "../../components/TabBar/TabBar";
 import AnonymizationConfirmDialog from "../../components/dialogs/AnonymizationConfirmDialog";
 import FeedbackDialog from "../../components/dialogs/FeedbackDialog";
 import { useFindWidget } from "../../components/find/FindWidget";
 import TimelineItem from "../../components/gui/TimelineItem";
-import { NewSessionButton } from "../../components/mainInput/belowMainInput/NewSessionButton";
-import ThinkingBlockPeek from "../../components/mainInput/belowMainInput/ThinkingBlockPeek";
 import ContinueInputBox from "../../components/mainInput/ContinueInputBox";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor";
-import { useOnboardingCard } from "../../components/OnboardingCard";
-import StepContainer from "../../components/StepContainer";
-import { TabBar } from "../../components/TabBar/TabBar";
+import { NewSessionButton } from "../../components/mainInput/belowMainInput/NewSessionButton";
+import ThinkingBlockPeek from "../../components/mainInput/belowMainInput/ThinkingBlockPeek";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useWebviewListener } from "../../hooks/useWebviewListener";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
@@ -36,6 +36,7 @@ import {
   selectCurrentToolCall,
   selectCurrentToolCallApplyState,
 } from "../../redux/selectors/selectCurrentToolCall";
+import { selectSelectedChatModel } from "../../redux/slices/configSlice";
 import {
   newSession,
   updateToolCallOutput,
@@ -116,6 +117,9 @@ export function Chat() {
   const toolCallState = useAppSelector(selectCurrentToolCall);
   const mode = useAppSelector((store) => store.session.mode);
   const isInEdit = useAppSelector((store) => store.session.isInEdit);
+  const config = useAppSelector((state) => state.config.config);
+  const sessionState = useAppSelector((state) => state.session);
+  const selectedChatModel = useAppSelector(selectSelectedChatModel);
 
   const lastSessionId = useAppSelector((state) => state.session.lastSessionId);
   const hasDismissedExploreDialog = useAppSelector(
@@ -203,11 +207,34 @@ export function Chat() {
           dispatch,
         });
 
-        const textContent = stripImages(userInstructions);
+        let textContents = "";
 
+        // NEW: Get the real prompt that would be sent to LLM with all context
+      
+        if (selectedChatModel) {
+          const [contextItems, __, userInstructions, _] =
+            await resolveEditorContent({
+              editorState,
+              modifiers: {
+                noContext: true,
+                useCodebase: false,
+              },
+              ideMessenger,
+              defaultContextProviders: [],
+              availableSlashCommands: [],
+              dispatch,
+            });
+
+          textContents = [
+            ...contextItems.map((item) => item.content),
+            stripImages(userInstructions),
+            codeToEdit.map((item) => item.contents).join("\n"),
+          ].join("\n\n");
+        }
+        
         // Call anonymization service
         const anonymizationResult =
-          await anonymizationService.anonymizeText(textContent);
+          await anonymizationService.anonymizeText(textContents);
 
         // Show confirmation dialog
         const confirmed = await new Promise<boolean>((resolve) => {
@@ -267,33 +294,7 @@ export function Chat() {
         }
       }
 
-      // TODO - hook up with hub to detect free trial progress
-      // if (model.provider === "free-trial") {
-      //   const newCount = incrementFreeTrialCount();
-
-      //   if (newCount === FREE_TRIAL_LIMIT_REQUESTS) {
-      //     posthog?.capture("ftc_reached");
-      //   }
-      //   if (newCount >= FREE_TRIAL_LIMIT_REQUESTS) {
-      //     // Show this message whether using platform or not
-      //     // So that something happens if in new chat
-      //     void ideMessenger.ide.showToast(
-      //       "error",
-      //       "You've reached the free trial limit. Please configure a model to continue.",
-      //     );
-
-      //     // Card in chat will only show if no history
-      //     // Also, note that platform card ignore the "Best", always opens to main tab
-      //     onboardingCard.open("Best");
-
-      //     // If history, show the dialog, which will automatically close if there is not history
-      //     if (history.length) {
-      //       dispatch(setDialogMessage(<FreeTrialOverDialog />));
-      //       dispatch(setShowDialog(true));
-      //     }
-      //     return;
-      //   }
-      // }
+      
 
       if (isInEdit) {
         void dispatch(
