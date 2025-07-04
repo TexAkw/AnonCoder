@@ -1,0 +1,7 @@
+name: boslai_proxy
+channels:
+- defaults
+- conda-forge
+dependencies:
+- poetry=1.8.3
+- python=3.12.7

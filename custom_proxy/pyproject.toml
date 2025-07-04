@@ -1,0 +1,22 @@
+[tool.poetry]
+package-mode = false
+
+
+[tool.poetry.dependencies]
+python = "3.12.7"
+pytest = "8.2.1"
+python-dotenv = "1.0.1"
+fastapi = "0.104.1"
+uvicorn = "0.24.0"
+pydantic = "2.5.0"
+requests = "2.31.0"
+tiktoken = "0.5.2"
+psycopg = "^3.2.9"
+
+
+[tool.poetry.group.dev.dependencies]
+testcontainers = "4.9.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
