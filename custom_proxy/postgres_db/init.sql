@@ -1,0 +1,1 @@
+SELECT 'CREATE DATABASE proxy_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'proxy_db')\gexec

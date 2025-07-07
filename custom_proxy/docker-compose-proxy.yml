@@ -1,0 +1,22 @@
+services:
+
+  postgres-proxy:
+    image: postgres:16.3-alpine
+    container_name: "postgres-proxy"
+    restart: always
+    profiles:
+      - ''
+      - postgres-proxy
+    ports:
+      - "5435:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=default_db
+    volumes:
+      - proxy-postgresdb-data:/var/lib/postgresql/data
+      - ./postgres_db/init.sql:/docker-entrypoint-initdb.d/init.sql
+  
+
+volumes:
+  proxy-postgresdb-data:
