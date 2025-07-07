@@ -13,10 +13,10 @@ load_dotenv()
 
 
 class DLP:
-    def __init__(self):
+    def __init__(self, stats_storer: PGStatsStorer):
         self.data = {}  # Store mapping of anonymized tokens to original values
         self.counter = {}  # Counter for each entity type
-        self.stats = PGStatsStorer(os.getenv("POSTGRES_CONNECTION_STRING"))
+        self.stats_storer = stats_storer
         self.ner_service = NERService()
     
     def anonymize(self, text: str) -> str:
@@ -50,7 +50,7 @@ class DLP:
             "dlp_anonymization_time": dlp_time
         }
 
-        self.stats.store_stats_dlp(stats)
+        self.stats_storer.store_stats_dlp(stats)
         return anonymized_text, anonymization_map
 
     def apply_dlp(self, text: str, entities_dict: Dict) -> tuple[str, Dict[str, str]]:

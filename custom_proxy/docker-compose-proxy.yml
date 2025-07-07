@@ -1,5 +1,4 @@
 services:
-
   postgres-proxy:
     image: postgres:16.3-alpine
     container_name: "postgres-proxy"
@@ -8,7 +7,7 @@ services:
       - ''
       - postgres-proxy
     ports:
-      - "5435:5432"
+      - "5432:5435"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -17,6 +16,20 @@ services:
       - proxy-postgresdb-data:/var/lib/postgresql/data
       - ./postgres_db/init.sql:/docker-entrypoint-initdb.d/init.sql
   
+  boslai-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "boslai-proxy"
+    restart: always
+    profiles:
+      - ''
+      - boslai-proxy
+    ports:
+      - "7002:7002"
+    env_file:
+      - .proxy.env
+    entrypoint: [ "uvicorn", "proxy:app", "--host", "0.0.0.0", "--port", "7002"]
 
 volumes:
   proxy-postgresdb-data:

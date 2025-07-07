@@ -13,12 +13,7 @@ from schemas import (
     AnonymizeRequest,
     AnonymizeResponse,
 )
-from services import (
-    NERService,
-    TokenService,
-    AnonymizationService,
-    DLP,
-)
+from services import DLP
 from data_manager.stats_storer import PGStatsStorer
 from generation.worker_generation import WorkerGeneration
 
@@ -32,7 +27,9 @@ data_dlp = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    data_dlp["stats_storer"] = PGStatsStorer(os.getenv("POSTGRES_CONNECTION_STRING"))
+    stats_storer = PGStatsStorer(os.getenv("POSTGRES_CONNECTION_STRING"))
+    data_dlp["stats_storer"] = stats_storer
+    data_dlp["dlp"] = DLP(stats_storer)
     yield
     logging.info("Clearing DLP")
     data_dlp.clear()
@@ -45,13 +42,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# Initialize services
-ner_service = NERService()
-token_service = TokenService()
-anonymization_service = AnonymizationService()
-dlp = DLP()
 
 
 @app.post("/v1/clear-dlp")
@@ -74,7 +64,7 @@ async def anonymize(request: AnonymizeRequest):
     """
     Anonymize text by replacing PII with placeholders using NER service.
     """
-    anonymized_text, anonymization_map = dlp.anonymize(request.text)
+    anonymized_text, anonymization_map = data_dlp["dlp"].anonymize(request.text)
 
     return AnonymizeResponse(
         original_text=request.text,
@@ -89,7 +79,7 @@ async def chat_completion(request: ChatRequest):
     OpenAI-compatible chat completion endpoint that forwards requests to the OpenAI API.
     """
     try:
-        worker_generation = WorkerGeneration(data_dlp["stats_storer"], dlp)
+        worker_generation = WorkerGeneration(data_dlp["stats_storer"], data_dlp["dlp"])
         response = worker_generation.generate_response(request.messages, request.model, request.stream)
         return response
     except requests.RequestException as e:
