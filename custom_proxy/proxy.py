@@ -34,6 +34,7 @@ def validate_environment_variables():
     required_vars = [
         "POSTGRES_CONNECTION_STRING",
         "OPENAI_API_KEY",
+        "OPENAI_API_BASE",
         "NER_API_KEY",
         "NER_API_BASE",
     ]
@@ -79,7 +80,8 @@ def print_environment_setup_guide(missing_vars):
     }
 
     for var in missing_vars:
-        description = var_descriptions.get(var, "Required environment variable")
+        description = var_descriptions.get(
+            var, "Required environment variable")
         print(f"   • {var}")
         print(f"     {description}")
         print()
@@ -105,7 +107,8 @@ async def lifespan(app: FastAPI):
 
     if missing_vars:
         print_environment_setup_guide(missing_vars)
-        logger.error("Application startup failed due to missing environment variables")
+        logger.error(
+            "Application startup failed due to missing environment variables")
         # Exit gracefully instead of crashing with a stack trace
         sys.exit(1)
 
@@ -202,9 +205,12 @@ async def chat_completion(request: ChatRequest):
     except requests.RequestException as e:
         raise HTTPException(
             status_code=500, detail=f"Error from OpenAI API: {str(e)}")
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error from API: {str(e)}")
+
 
 if __name__ == "__main__":
     uvicorn.run(app="proxy:app", host="0.0.0.0", port=7002, reload=True)

@@ -17,24 +17,42 @@ class WorkerGeneration:
     def __init__(self, stats_storer: PGStatsStorer, dlp: DLP):
         self.stats_storer = stats_storer
         self.dlp = dlp
-    
+
     def get_last_user_message(self, messages: List[Message]):
         for msg in reversed(messages):
             if msg.role == "user":
                 return msg.content
         return None
-    
+
     def call_llm_service(self, messages: List[Message], model: str):
-        
-        start_time = time.time()
-        last_user_message = self.get_last_user_message(messages)
+        try:
+            start_time = time.time()
+            last_user_message = self.get_last_user_message(messages)
 
-        if not last_user_message:
-            raise HTTPException(
-                status_code=400, detail="No user message found in the request")
+        except Exception as e:
+            logger.error(f"ERROR: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
-        llm_service = LLMServices().get_llm_service(model)
-        response = llm_service.call_llm(last_user_message)
+        finally:
+            if not last_user_message:
+                raise HTTPException(
+                    status_code=400, detail="No user message found in the request")
+
+        try:
+            llm_service = LLMServices().get_llm_service(model)
+        except ValueError as e:
+            logger.error(f"ERROR: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"ERROR: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+        try:
+            response = llm_service.call_llm(last_user_message)
+        except Exception as e:
+            logger.error(f"ERROR: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
         end_time = time.time()
         llm_time = (end_time - start_time) * 1000
         anonymized_response = response["content"]
@@ -48,26 +66,41 @@ class WorkerGeneration:
             "llm_time": llm_time
         }
         return info
-    
+
     def deanonymize(self, anonymized_response: str):
         start_deanonymization_time = time.time()
         deanonymized_response = self.dlp.deanonymize(anonymized_response)
         end_deanonymization_time = time.time()
-        dlp_deanonymization_time = (end_deanonymization_time - start_deanonymization_time) * 1000
+        dlp_deanonymization_time = (
+            end_deanonymization_time - start_deanonymization_time) * 1000
         return deanonymized_response, dlp_deanonymization_time
 
     def generate_response(self, messages: List[Message], model: str, stream: bool = False):
-        
-        llm_info = self.call_llm_service(messages, model)
+
+        try:
+            llm_info = self.call_llm_service(messages, model)
+        except HTTPException as e:
+            raise HTTPException(status_code=e.status_code, detail=e.detail)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
         anonymized_response = llm_info["anonymized_response"]
         prompt_tokens = llm_info["prompt_tokens"]
         completion_tokens = llm_info["completion_tokens"]
         llm_time = llm_info["llm_time"]
-        
-        deanonymized_response, dlp_deanonymization_time = self.deanonymize(anonymized_response)
+
+        try:
+            deanonymized_response, dlp_deanonymization_time = self.deanonymize(
+                anonymized_response)
+        except HTTPException as e:
+            logger.error(f"ERROR: {e}")
+            raise HTTPException(status_code=e.status_code, detail=e.detail)
+        except Exception as e:
+            logger.error(f"ERROR: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
         logger.info("=================== FINAL RESPONSE ===================")
-        logger.info(deanonymized_response)
+        logger.info(f"DEANONYMIZED RESPONSE: {deanonymized_response}")
         logger.info(f"PROMPT TOKENS: {prompt_tokens}")
         logger.info(f"COMPLETION TOKENS: {completion_tokens}")
         logger.info(f"TOTAL TOKENS: {prompt_tokens + completion_tokens}")
