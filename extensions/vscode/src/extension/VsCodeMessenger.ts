@@ -1,6 +1,7 @@
 import { ConfigHandler } from "core/config/ConfigHandler";
 import { DataLogger } from "core/data/log";
 import { EDIT_MODE_STREAM_ID } from "core/edit/constants";
+import { pruneLinesFromBottom, pruneLinesFromTop } from "core/llm/countTokens";
 import {
   FromCoreProtocol,
   FromWebviewProtocol,
@@ -203,6 +204,7 @@ export class VsCodeMessenger {
     this.onWebview("edit/sendPrompt", async (msg) => {
       const prompt = msg.data.prompt;
       const { start, end } = msg.data.range.range;
+      const preExtracted = msg.data.preExtracted;
       const verticalDiffManager = await verticalDiffManagerPromise;
 
       const configHandler = await configHandlerPromise;
@@ -228,6 +230,7 @@ export class VsCodeMessenger {
           new vscode.Position(end.line, end.character),
         ),
         rulesToInclude: config.rules,
+        preExtracted,
       });
 
       // Log dev data
@@ -247,6 +250,57 @@ export class VsCodeMessenger {
 
     this.onWebview("edit/clearDecorations", async (msg) => {
       editDecorationManager.clear();
+    });
+
+    this.onWebview("edit/extractContent", async (msg) => {
+      const { range, contextLength, model } = msg.data;
+      const { start, end } = range.range;
+
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.uri.toString() !== range.filepath) {
+        throw new Error(
+          "No active editor or file mismatch for content extraction",
+        );
+      }
+
+      // Use the same logic as manager.ts
+      let selectedRange = new vscode.Range(
+        new vscode.Position(start.line, start.character),
+        new vscode.Position(end.line, end.character),
+      );
+
+      // Only if the selection is empty, use exact prefix/suffix instead of by line
+      if (selectedRange.isEmpty) {
+        selectedRange = new vscode.Range(
+          editor.selection.start.with(undefined, 0),
+          editor.selection.end.with(undefined, Number.MAX_SAFE_INTEGER),
+        );
+      }
+
+      const rangeContent = editor.document.getText(selectedRange);
+      const prefix = pruneLinesFromTop(
+        editor.document.getText(
+          new vscode.Range(new vscode.Position(0, 0), selectedRange.start),
+        ),
+        (contextLength || 8192) / 4,
+        model || "gpt-4",
+      );
+      const suffix = pruneLinesFromBottom(
+        editor.document.getText(
+          new vscode.Range(
+            selectedRange.end,
+            new vscode.Position(editor.document.lineCount, 0),
+          ),
+        ),
+        (contextLength || 8192) / 4,
+        model || "gpt-4",
+      );
+
+      return {
+        prefix,
+        suffix,
+        rangeContent,
+      };
     });
 
     /** PASS THROUGH FROM WEBVIEW TO CORE AND BACK **/

@@ -50,11 +50,29 @@ export type ToIdeFromWebviewProtocol = ToIdeFromWebviewOrCoreProtocol & {
     {
       prompt: MessageContent;
       range: RangeInFileWithContents;
+      // Optional pre-extracted content to avoid re-extracting from file
+      preExtracted?: {
+        prefix: string;
+        suffix: string;
+        rangeContent: string;
+      };
     },
     string | undefined,
   ];
   "edit/addCurrentSelection": [undefined, void];
   "edit/clearDecorations": [undefined, void];
+  "edit/extractContent": [
+    {
+      range: RangeInFileWithContents;
+      contextLength?: number;
+      model?: string;
+    },
+    {
+      prefix: string;
+      suffix: string;
+      rangeContent: string;
+    },
+  ];
 };
 
 export type ToWebviewFromIdeProtocol = ToWebviewFromIdeOrCoreProtocol & {

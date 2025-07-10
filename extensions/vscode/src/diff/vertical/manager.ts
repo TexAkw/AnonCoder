@@ -284,6 +284,7 @@ export class VerticalDiffManager {
     newCode,
     toolCallId,
     rulesToInclude,
+    preExtracted,
   }: {
     input: string;
     llm: ILLM;
@@ -294,6 +295,11 @@ export class VerticalDiffManager {
     newCode?: string;
     toolCallId?: string;
     rulesToInclude: undefined | RuleWithSource[];
+    preExtracted?: {
+      prefix: string;
+      suffix: string;
+      rangeContent: string;
+    };
   }): Promise<string | undefined> {
     vscode.commands.executeCommand("setContext", "continue.diffVisible", true);
 
@@ -381,33 +387,44 @@ export class VerticalDiffManager {
     }
 
     let selectedRange = diffHandler.range;
+    let rangeContent: string;
+    let prefix: string;
+    let suffix: string;
 
-    // Only if the selection is empty, use exact prefix/suffix instead of by line
-    if (selectedRange.isEmpty) {
-      selectedRange = new vscode.Range(
-        editor.selection.start.with(undefined, 0),
-        editor.selection.end.with(undefined, Number.MAX_SAFE_INTEGER),
+    if (preExtracted) {
+      // Use pre-extracted content (likely anonymized)
+      rangeContent = preExtracted.rangeContent;
+      prefix = preExtracted.prefix;
+      suffix = preExtracted.suffix;
+    } else {
+      // Original extraction logic
+      // Only if the selection is empty, use exact prefix/suffix instead of by line
+      if (selectedRange.isEmpty) {
+        selectedRange = new vscode.Range(
+          editor.selection.start.with(undefined, 0),
+          editor.selection.end.with(undefined, Number.MAX_SAFE_INTEGER),
+        );
+      }
+
+      rangeContent = editor.document.getText(selectedRange);
+      prefix = pruneLinesFromTop(
+        editor.document.getText(
+          new vscode.Range(new vscode.Position(0, 0), selectedRange.start),
+        ),
+        llm.contextLength / 4,
+        llm.model,
+      );
+      suffix = pruneLinesFromBottom(
+        editor.document.getText(
+          new vscode.Range(
+            selectedRange.end,
+            new vscode.Position(editor.document.lineCount, 0),
+          ),
+        ),
+        llm.contextLength / 4,
+        llm.model,
       );
     }
-
-    const rangeContent = editor.document.getText(selectedRange);
-    const prefix = pruneLinesFromTop(
-      editor.document.getText(
-        new vscode.Range(new vscode.Position(0, 0), selectedRange.start),
-      ),
-      llm.contextLength / 4,
-      llm.model,
-    );
-    const suffix = pruneLinesFromBottom(
-      editor.document.getText(
-        new vscode.Range(
-          selectedRange.end,
-          new vscode.Position(editor.document.lineCount, 0),
-        ),
-      ),
-      llm.contextLength / 4,
-      llm.model,
-    );
 
     let overridePrompt: ChatMessage[] | undefined;
     if (llm.promptTemplates?.apply) {

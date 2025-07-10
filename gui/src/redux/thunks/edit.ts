@@ -6,7 +6,10 @@ import {
   SetCodeToEditPayload,
 } from "core";
 import { stripImages } from "core/util/messageContent";
+import React from "react";
+import AnonymizationConfirmDialog from "../../components/dialogs/AnonymizationConfirmDialog";
 import { resolveEditorContent } from "../../components/mainInput/TipTapEditor";
+import { anonymizationService } from "../../util/anonymization";
 import {
   clearCodeToEdit,
   INITIAL_EDIT_APPLY_STATE,
@@ -21,6 +24,7 @@ import {
   setMainEditorContentTrigger,
   setMode,
 } from "../slices/sessionSlice";
+import { setDialogMessage, setShowDialog } from "../slices/uiSlice";
 import { ThunkApiType } from "../store";
 import { loadLastSession, saveCurrentSession } from "./session";
 import { streamThunkWrapper } from "./streamThunkWrapper";
@@ -34,7 +38,7 @@ export const streamEditThunk = createAsyncThunk<
   ThunkApiType
 >(
   "chat/streamResponse",
-  async ({ editorState, codeToEdit }, { dispatch, extra }) => {
+  async ({ editorState, codeToEdit }, { dispatch, extra, getState }) => {
     await dispatch(
       streamThunkWrapper(async () => {
         dispatch(setActive());
@@ -51,14 +55,160 @@ export const streamEditThunk = createAsyncThunk<
             dispatch,
           });
 
-        const prompt = [
+        const userPrompt = [
           ...contextItems.map((item) => item.content),
           stripImages(userInstructions),
         ].join("\n\n");
 
+        const rangeInFile = codeToEdit[0] as RangeInFileWithContents;
+
+        // Get model for context length calculation (same logic as in VsCodeMessenger)
+        const state = getState();
+        const config = state.config.config;
+        const model =
+          config?.selectedModelByRole?.edit ??
+          config?.selectedModelByRole?.chat;
+
+        if (!model) {
+          throw new Error("No Edit or Chat model selected");
+        }
+
+        // Extract prefix/suffix/rangeContent using original methods before anonymization
+        let prefix = "";
+        let suffix = "";
+        let rangeContent = rangeInFile.contents;
+
+        try {
+          // Use the new protocol method to extract content with original methods
+          const extractedContent = await extra.ideMessenger.request(
+            "edit/extractContent",
+            {
+              range: rangeInFile,
+              contextLength: model.contextLength || 8192,
+              model: model.model,
+            },
+          );
+
+          if (extractedContent.status === "error") {
+            throw new Error(extractedContent.error);
+          }
+
+          prefix = extractedContent.content.prefix;
+          suffix = extractedContent.content.suffix;
+          rangeContent = extractedContent.content.rangeContent;
+        } catch (error) {
+          console.error("Error extracting content for anonymization:", error);
+          // Continue with just the selected text
+          rangeContent = rangeInFile.contents;
+          prefix = "";
+          suffix = "";
+        }
+
+        // NEW: Anonymization workflow for edit mode
+        try {
+          // Combine all text content for anonymization
+          const textContents = [
+            userPrompt && `User prompt:\n${userPrompt}`,
+            prefix && `Prefix:\n${prefix}`,
+            rangeContent && `Selected code:\n${rangeContent}`,
+            suffix && `Suffix:\n${suffix}`,
+          ]
+            .filter(Boolean)
+            .join("\n\n");
+
+          // Call anonymization service
+          const anonymizationResult =
+            await anonymizationService.anonymizeText(textContents);
+
+          // Show confirmation dialog
+          const confirmed = await new Promise<boolean>((resolve) => {
+            const handleConfirm = () => {
+              dispatch(setShowDialog(false));
+              resolve(true);
+            };
+
+            const handleCancel = () => {
+              dispatch(setShowDialog(false));
+              resolve(false);
+            };
+
+            dispatch(
+              setDialogMessage(
+                React.createElement(AnonymizationConfirmDialog, {
+                  anonymizationResult,
+                  onConfirm: handleConfirm,
+                  onCancel: handleCancel,
+                }),
+              ),
+            );
+            dispatch(setShowDialog(true));
+          });
+
+          if (!confirmed) {
+            return; // User cancelled
+          }
+
+          // If confirmed and there are changes, use anonymized content
+          if (Object.keys(anonymizationResult.anonymizationMap).length > 0) {
+            // Apply anonymization to each piece of content
+            let anonymizedPrompt = userPrompt;
+            let anonymizedPrefix = prefix;
+            let anonymizedSuffix = suffix;
+            let anonymizedRangeContent = rangeContent;
+
+            // Apply anonymization mapping to each content piece
+            for (const [placeholder, original] of Object.entries(
+              anonymizationResult.anonymizationMap,
+            )) {
+              const escapedOriginal = original.replace(
+                /[.*+?^${}()|[\]\\]/g,
+                "\\$&",
+              );
+              const regex = new RegExp(escapedOriginal, "g");
+
+              anonymizedPrompt = anonymizedPrompt.replace(regex, placeholder);
+              anonymizedPrefix = anonymizedPrefix.replace(regex, placeholder);
+              anonymizedSuffix = anonymizedSuffix.replace(regex, placeholder);
+              anonymizedRangeContent = anonymizedRangeContent.replace(
+                regex,
+                placeholder,
+              );
+            }
+
+            // Send anonymized content with pre-extracted data
+            const response = await extra.ideMessenger.request(
+              "edit/sendPrompt",
+              {
+                prompt: anonymizedPrompt,
+                range: rangeInFile,
+                preExtracted: {
+                  prefix: anonymizedPrefix,
+                  suffix: anonymizedSuffix,
+                  rangeContent: anonymizedRangeContent,
+                },
+              },
+            );
+
+            if (response.status === "error") {
+              throw new Error(response.error);
+            }
+            return;
+          }
+        } catch (error) {
+          console.error("Anonymization failed:", error);
+          // Show error to user and optionally proceed without anonymization
+          const proceed = confirm(
+            "Anonymization service failed. Do you want to proceed without anonymization?",
+          );
+          if (!proceed) {
+            return;
+          }
+        }
+
+        // Original flow (if no anonymization or anonymization failed and user chose to proceed)
         const response = await extra.ideMessenger.request("edit/sendPrompt", {
-          prompt,
-          range: codeToEdit[0] as RangeInFileWithContents,
+          prompt: userPrompt,
+          range: rangeInFile,
         });
 
         if (response.status === "error") {
