@@ -2,17 +2,82 @@ import { createAsyncThunk, unwrapResult } from "@reduxjs/toolkit";
 import { ChatMessage, LLMFullCompletionOptions } from "core";
 import { modelSupportsTools } from "core/llm/autodetect";
 import { ToCoreProtocol } from "core/protocol";
+import { renderChatMessage } from "core/util/messageContent";
+import { createAnonymizationService } from "../../../../custom_proxy/utils/anonymization";
+import { createSupabaseClient } from "../../util/supabase-client";
 import { selectActiveTools } from "../selectors/selectActiveTools";
 import { selectCurrentToolCall } from "../selectors/selectCurrentToolCall";
 import { selectSelectedChatModel } from "../slices/configSlice";
 import {
-  abortStream,
-  addPromptCompletionPair,
-  setToolGenerated,
-  streamUpdate,
+    abortStream,
+    addPromptCompletionPair,
+    setToolGenerated,
+    streamUpdate,
 } from "../slices/sessionSlice";
 import { ThunkApiType } from "../store";
 import { callCurrentTool } from "./callCurrentTool";
+
+// Helper function to extract Supabase config from data array
+function getSupabaseConfigFromData(data: any[] | undefined) {
+  if (!data) return { supabaseUrl: null, supabaseKey: null };
+  
+  const supabaseEntry = data.find(entry => 
+    entry.name === 'supabase' || 
+    entry.destination?.includes('supabase') ||
+    entry.supabaseUrl
+  );
+  
+  if (supabaseEntry) {
+    return {
+      supabaseUrl: supabaseEntry.supabaseUrl || supabaseEntry.destination,
+      supabaseKey: supabaseEntry.supabaseKey || supabaseEntry.apiKey
+    };
+  }
+  
+  return { supabaseUrl: null, supabaseKey: null };
+}
+
+// Helper function to anonymize assistant messages
+async function anonymizeAssistantMessages(messages: ChatMessage[], config: any): Promise<ChatMessage[]> {
+  // Get Supabase configuration from config.data
+  const configData = (config as any).data || [];
+  const { supabaseUrl, supabaseKey } = getSupabaseConfigFromData(configData);
+  
+  if (!supabaseUrl || !supabaseKey) {
+    return messages; // Return original messages if no supabase config
+  }
+  
+  const supabaseClient = createSupabaseClient(supabaseUrl, supabaseKey);
+  const anonymizationService = createAnonymizationService(supabaseClient);
+  
+  // Check if assistant response anonymization is enabled
+  if (!anonymizationService.shouldAnonymizeAssistantResponses()) {
+    return messages;
+  }
+
+  const anonymizedMessages = await Promise.all(
+    messages.map(async (message) => {
+      if (message.role === "assistant" && message.content) {
+        try {
+          // Convert MessageContent to string using renderChatMessage
+          const messageText = renderChatMessage(message);
+          if (messageText.trim()) {
+            const result = await anonymizationService.anonymizeText(messageText);
+            return {
+              ...message,
+              content: result.anonymizedText,
+            };
+          }
+        } catch (error) {
+          console.error("Failed to anonymize assistant response:", error);
+          // Return original message if anonymization fails
+        }
+      }
+      return message;
+    })
+  );
+  return anonymizedMessages;
+}
 
 export const streamNormalInput = createAsyncThunk<
   void,
@@ -64,7 +129,10 @@ export const streamNormalInput = createAsyncThunk<
         break;
       }
 
-      dispatch(streamUpdate(next.value));
+      // NEW: Anonymize assistant responses before updating history
+      const anonymizedMessages = await anonymizeAssistantMessages(next.value, getState().config.config);
+      dispatch(streamUpdate(anonymizedMessages));
+      
       next = await gen.next();
     }
 

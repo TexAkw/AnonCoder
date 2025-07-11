@@ -2,6 +2,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   ExclamationTriangleIcon,
+  ShieldCheckIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import {
@@ -9,7 +10,9 @@ import {
   modifyAnyConfigWithSharedConfig,
 } from "core/config/sharedConfig";
 import { useContext, useEffect, useState } from "react";
+import { createAnonymizationService } from "../../../../custom_proxy/utils/anonymization";
 import { Input } from "../../components";
+import AnonymizationSettings from "../../components/dialogs/AnonymizationSettings";
 import NumberInput from "../../components/gui/NumberInput";
 import { Select } from "../../components/gui/Select";
 import ToggleSwitch from "../../components/gui/Switch";
@@ -18,7 +21,9 @@ import { useFontSize } from "../../components/ui/font";
 import { IdeMessengerContext } from "../../context/IdeMessenger";
 import { useAppDispatch, useAppSelector } from "../../redux/hooks";
 import { updateConfig } from "../../redux/slices/configSlice";
+import { setDialogMessage, setShowDialog } from "../../redux/slices/uiSlice";
 import { setLocalStorage } from "../../util/localStorage";
+import { useSupabase } from "../../util/supabase-client";
 
 export function UserSettingsForm() {
   /////// User settings section //////
@@ -26,6 +31,17 @@ export function UserSettingsForm() {
   const ideMessenger = useContext(IdeMessengerContext);
   const config = useAppSelector((state) => state.config.config);
   const [showExperimental, setShowExperimental] = useState(false);
+
+  // Get supabase client
+  const supabaseClient = useSupabase();
+
+  // Create anonymization service with supabase client
+  const anonymizationService = createAnonymizationService(supabaseClient);
+
+  // NEW: Anonymization settings state
+  const [anonymizationConfig, setAnonymizationConfig] = useState(
+    anonymizationService.getConfig(),
+  );
 
   function handleUpdate(sharedConfig: SharedConfigSchema) {
     // Optimistic update
@@ -37,6 +53,16 @@ export function UserSettingsForm() {
     // Actual update to core which propagates back with config update event
     ideMessenger.post("config/updateSharedConfig", sharedConfig);
   }
+
+  // NEW: Handle anonymization config updates
+  const handleAnonymizationUpdate = (
+    key: keyof typeof anonymizationConfig,
+    value: boolean,
+  ) => {
+    const newConfig = { ...anonymizationConfig, [key]: value };
+    setAnonymizationConfig(newConfig);
+    anonymizationService.updateConfig(newConfig);
+  };
 
   // Disable autocomplete
   const disableAutocompleteInFiles = (
@@ -221,6 +247,40 @@ export function UserSettingsForm() {
               text="Enable Indexing"
             />
 
+            {/* NEW: Anonymization Settings */}
+            <ToggleSwitch
+              isToggled={anonymizationConfig.anonymizeUserInput}
+              onToggle={() =>
+                handleAnonymizationUpdate(
+                  "anonymizeUserInput",
+                  !anonymizationConfig.anonymizeUserInput,
+                )
+              }
+              text="Anonymize User Input"
+            />
+
+            <ToggleSwitch
+              isToggled={anonymizationConfig.anonymizeAssistantResponses}
+              onToggle={() =>
+                handleAnonymizationUpdate(
+                  "anonymizeAssistantResponses",
+                  !anonymizationConfig.anonymizeAssistantResponses,
+                )
+              }
+              text="Anonymize Assistant Responses"
+            />
+
+            <ToggleSwitch
+              isToggled={anonymizationConfig.showConfirmationDialog}
+              onToggle={() =>
+                handleAnonymizationUpdate(
+                  "showConfirmationDialog",
+                  !anonymizationConfig.showConfirmationDialog,
+                )
+              }
+              text="Show Anonymization Preview"
+            />
+
             {/* <ToggleSwitch
                     isToggled={useAutocompleteCache}
                     onToggle={() =>
@@ -386,6 +446,37 @@ export function UserSettingsForm() {
                   }
                   text="Add Current File by Default"
                 />
+
+                {/* NEW: Advanced Anonymization Settings Button */}
+                <div className="flex items-center justify-between">
+                  <span className="text-left text-sm">
+                    Advanced Anonymization
+                  </span>
+                  <button
+                    onClick={() => {
+                      dispatch(
+                        setDialogMessage(
+                          <AnonymizationSettings
+                            onSave={(config) => {
+                              console.log("Advanced settings saved:", config);
+                              dispatch(setShowDialog(false));
+                              dispatch(setDialogMessage(undefined));
+                            }}
+                            onCancel={() => {
+                              dispatch(setShowDialog(false));
+                              dispatch(setDialogMessage(undefined));
+                            }}
+                          />,
+                        ),
+                      );
+                      dispatch(setShowDialog(true));
+                    }}
+                    className="flex items-center gap-2 rounded bg-blue-600 px-3 py-1 text-xs transition-colors hover:bg-blue-700"
+                  >
+                    <ShieldCheckIcon className="h-3 w-3" />
+                    Configure
+                  </button>
+                </div>
               </div>
             </div>
           </div>

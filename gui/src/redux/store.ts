@@ -1,20 +1,22 @@
 import {
-  combineReducers,
-  configureStore,
-  ThunkDispatch,
-  UnknownAction,
+    combineReducers,
+    configureStore,
+    ThunkDispatch,
+    UnknownAction,
 } from "@reduxjs/toolkit";
 import { createLogger } from "redux-logger";
 import {
-  createMigrate,
-  MigrationManifest,
-  persistReducer,
-  persistStore,
+    createMigrate,
+    MigrationManifest,
+    persistReducer,
+    persistStore,
 } from "redux-persist";
 import { createFilter } from "redux-persist-transform-filter";
 import autoMergeLevel2 from "redux-persist/lib/stateReconciler/autoMergeLevel2";
 import storage from "redux-persist/lib/storage";
 import { IdeMessenger, IIdeMessenger } from "../context/IdeMessenger";
+// Uncomment to use middleware approach instead of thunk approach
+// import { anonymizationMiddleware } from "./middleware/anonymizationMiddleware";
 import { profilesReducer } from "./slices";
 import configReducer from "./slices/configSlice";
 import editModeStateReducer from "./slices/editState";
@@ -132,9 +134,11 @@ export function setupStore(options: { ideMessenger?: IIdeMessenger }) {
             ideMessenger,
           },
         },
-      }),
-    // This can be uncommented to get detailed Redux logs
-    // .concat(logger),
+      })
+      // Uncomment to use middleware approach instead of thunk approach
+      // .concat(anonymizationMiddleware)
+      // This can be uncommented to get detailed Redux logs
+      // .concat(logger),
   });
 }
 

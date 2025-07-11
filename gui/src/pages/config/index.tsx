@@ -1,12 +1,14 @@
 import {
-  BoltIcon,
-  CircleStackIcon,
-  Cog6ToothIcon,
-  QuestionMarkCircleIcon,
+    BoltIcon,
+    CircleStackIcon,
+    Cog6ToothIcon,
+    QuestionMarkCircleIcon,
+    ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
+import AnonymizationSettings from "../../components/dialogs/AnonymizationSettings";
 import { useNavigationListener } from "../../hooks/useNavigationListener";
 import { fontSize } from "../../util";
 import { AccountButton } from "./AccountButton";
@@ -33,6 +35,25 @@ function ConfigPage() {
       label: "Settings",
       component: <UserSettingsForm />,
       icon: <Cog6ToothIcon className="xs:h-4 xs:w-4 h-3 w-3 flex-shrink-0" />,
+    },
+    {
+      id: "privacy",
+      label: "Privacy",
+      component: (
+        <div className="flex flex-col gap-4 py-4">
+          <div>
+            <h2 className="mb-2 mt-0 p-0">Privacy & Anonymization</h2>
+            <p className="text-sm text-gray-400 mb-4">
+              Configure how your data is processed and anonymized
+            </p>
+          </div>
+          <AnonymizationSettings 
+            onSave={(config) => console.log('Settings saved:', config)}
+            onCancel={() => {}}
+          />
+        </div>
+      ),
+      icon: <ShieldCheckIcon className="xs:h-4 xs:w-4 h-3 w-3 flex-shrink-0" />,
     },
     {
       id: "indexing",

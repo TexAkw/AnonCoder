@@ -19,6 +19,13 @@
     "types": ["vitest/globals"]
     // Disabled for now since it's causing too many errors
   },
-  "include": ["src", "../src/util/messenger.ts"],
+  "include": [
+    "src",
+    "../src/util/messenger.ts",
+    "src/util/anoniaApiClient.ts",
+    "../custom_proxy/utils/anoniaTypes.ts",
+    "../custom_proxy/utils/anonymization.ts",
+    "src/util/supabase-client.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

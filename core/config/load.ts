@@ -677,7 +677,7 @@ async function finalToBrowserConfig(
         v ? llmToSerializedModelDescription(v) : null,
       ]),
     ) as Record<ModelRole, ModelDescription | null>, // TODO better types here
-    // data not included here because client doesn't need
+    ...({data: final.data} as any), // Include data field for GUI access
   };
 }
 
@@ -976,5 +976,6 @@ export {
   finalToBrowserConfig,
   intermediateToFinalConfig,
   loadContinueConfigFromJson,
-  type BrowserSerializedContinueConfig,
+  type BrowserSerializedContinueConfig
 };
+

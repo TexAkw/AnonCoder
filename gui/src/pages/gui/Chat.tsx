@@ -1,6 +1,7 @@
 import {
   ArrowLeftIcon,
   ChatBubbleOvalLeftIcon,
+  Cog6ToothIcon,
 } from "@heroicons/react/24/outline";
 import { Editor, JSONContent } from "@tiptap/react";
 import { InputModifiers } from "core";
@@ -17,11 +18,16 @@ import {
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import styled from "styled-components";
+import {
+  AnonymizationConfig,
+  AnonymizationService,
+} from "../../../../custom_proxy/utils/anonymization";
 import { Button, lightGray, vscBackground } from "../../components";
 import { useOnboardingCard } from "../../components/OnboardingCard";
 import StepContainer from "../../components/StepContainer";
 import { TabBar } from "../../components/TabBar/TabBar";
 import AnonymizationConfirmDialog from "../../components/dialogs/AnonymizationConfirmDialog";
+import AnonymizationSettings from "../../components/dialogs/AnonymizationSettings";
 import FeedbackDialog from "../../components/dialogs/FeedbackDialog";
 import { useFindWidget } from "../../components/find/FindWidget";
 import TimelineItem from "../../components/gui/TimelineItem";
@@ -38,6 +44,7 @@ import {
 } from "../../redux/selectors/selectCurrentToolCall";
 import { selectSelectedChatModel } from "../../redux/slices/configSlice";
 import {
+  ChatHistoryItemWithMessageId,
   newSession,
   updateToolCallOutput,
 } from "../../redux/slices/sessionSlice";
@@ -51,8 +58,8 @@ import { cancelStream } from "../../redux/thunks/cancelStream";
 import { streamEditThunk } from "../../redux/thunks/edit";
 import { loadLastSession } from "../../redux/thunks/session";
 import { isJetBrains, isMetaEquivalentKeyPressed } from "../../util";
-import { anonymizationService } from "../../util/anonymization";
 import { getLocalStorage, setLocalStorage } from "../../util/localStorage";
+import { useSupabase } from "../../util/supabase-client";
 import { EmptyChatBody } from "./EmptyChatBody";
 import { ExploreDialogWatcher } from "./ExploreDialogWatcher";
 import { ToolCallDiv } from "./ToolCallDiv";
@@ -120,7 +127,8 @@ export function Chat() {
   const config = useAppSelector((state) => state.config.config);
   const sessionState = useAppSelector((state) => state.session);
   const selectedChatModel = useAppSelector(selectSelectedChatModel);
-
+  const supabaseClient = useSupabase();
+  const anonymizationService = new AnonymizationService(supabaseClient);
   const lastSessionId = useAppSelector((state) => state.session.lastSessionId);
   const hasDismissedExploreDialog = useAppSelector(
     (state) => state.ui.hasDismissedExploreDialog,
@@ -193,108 +201,132 @@ export function Chat() {
       }
 
       // NEW: Anonymization workflow
-      try {
-        // Extract text content from editor state
-        const [_, __, userInstructions, ___] = await resolveEditorContent({
-          editorState,
-          modifiers: {
-            noContext: true,
-            useCodebase: false,
-          },
-          ideMessenger,
-          defaultContextProviders: [],
-          availableSlashCommands: [],
-          dispatch,
-        });
+      if (anonymizationService.getConfig().anonymizeUserInput) {
+        try {
+          // Extract text content from editor state
+          const [_, __, userInstructions, ___] = await resolveEditorContent({
+            editorState,
+            modifiers: {
+              noContext: true,
+              useCodebase: false,
+            },
+            ideMessenger,
+            defaultContextProviders: [],
+            availableSlashCommands: [],
+            dispatch,
+          });
 
-        let textContents = "";
+          let textContents = "";
 
-        // NEW: Get the real prompt that would be sent to LLM with all context
-      
-        if (selectedChatModel) {
-          const [contextItems, __, userInstructions, _] =
-            await resolveEditorContent({
-              editorState,
-              modifiers: {
-                noContext: true,
-                useCodebase: false,
-              },
-              ideMessenger,
-              defaultContextProviders: [],
-              availableSlashCommands: [],
-              dispatch,
+          // NEW: Get the real prompt that would be sent to LLM with all context
+
+          if (selectedChatModel) {
+            const [contextItems, __, userInstructions, _] =
+              await resolveEditorContent({
+                editorState,
+                modifiers: {
+                  noContext: true,
+                  useCodebase: false,
+                },
+                ideMessenger,
+                defaultContextProviders: [],
+                availableSlashCommands: [],
+                dispatch,
+              });
+
+            textContents = [
+              ...contextItems.map((item) => item.content),
+              stripImages(userInstructions),
+              //codeToEdit.map((item) => item.contents).join("\n"),
+            ].join("\n\n");
+          }
+
+          // Call anonymization service
+          const anonymizationResult =
+            await anonymizationService.anonymizeText(textContents);
+
+          console.log("anonymizationResult", anonymizationResult);
+
+          if (
+            anonymizationService.getConfig().showConfirmationDialog &&
+            Object.keys(anonymizationResult.anonymizationMap).length > 0
+          ) {
+            // Show confirmation dialog
+            const confirmed = await new Promise<boolean>((resolve) => {
+              const handleConfirm = () => {
+                dispatch(setShowDialog(false));
+                resolve(true);
+              };
+
+              const handleCancel = () => {
+                dispatch(setShowDialog(false));
+                resolve(false);
+              };
+
+              dispatch(
+                setDialogMessage(
+                  <AnonymizationConfirmDialog
+                    anonymizationResult={anonymizationResult}
+                    onConfirm={handleConfirm}
+                    onCancel={handleCancel}
+                  />,
+                ),
+              );
+              dispatch(setShowDialog(true));
             });
 
-          textContents = [
-            ...contextItems.map((item) => item.content),
-            stripImages(userInstructions),
-            codeToEdit.map((item) => item.contents).join("\n"),
-          ].join("\n\n");
-        }
-        
-        // Call anonymization service
-        const anonymizationResult =
-          await anonymizationService.anonymizeText(textContents);
+            if (!confirmed) {
+              return; // User cancelled
+            }
+          }
 
-        // Show confirmation dialog
-        const confirmed = await new Promise<boolean>((resolve) => {
-          const handleConfirm = () => {
-            dispatch(setShowDialog(false));
-            resolve(true);
-          };
-
-          const handleCancel = () => {
-            dispatch(setShowDialog(false));
-            resolve(false);
-          };
-
+          // If confirmed, create a new editor state with anonymized content
+          if (Object.keys(anonymizationResult.anonymizationMap).length > 0) {
+            // Create a new editor state with anonymized text
+            const anonymizedEditorState: JSONContent = {
+              type: "doc",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [
+                    {
+                      type: "text",
+                      text: anonymizationResult.anonymizedText,
+                    },
+                  ],
+                },
+              ],
+            };
+            editorState = anonymizedEditorState;
+          }
+        } catch (error) {
+          console.error("Anonymization failed:", error);
+          // Show error dialog and return early
           dispatch(
             setDialogMessage(
-              <AnonymizationConfirmDialog
-                anonymizationResult={anonymizationResult}
-                onConfirm={handleConfirm}
-                onCancel={handleCancel}
-              />,
+              <div className="p-4">
+                <h3 className="mb-2 text-lg font-semibold">
+                  Anonymization Error
+                </h3>
+                <p className="mb-4 text-sm text-gray-600">
+                  Failed to anonymize your input. Please try again or disable
+                  anonymization.
+                </p>
+                <Button
+                  onClick={() => {
+                    dispatch(setShowDialog(false));
+                    dispatch(setDialogMessage(undefined));
+                  }}
+                >
+                  OK
+                </Button>
+              </div>,
             ),
           );
           dispatch(setShowDialog(true));
-        });
-
-        if (!confirmed) {
-          return; // User cancelled
-        }
-
-        // If confirmed, create a new editor state with anonymized content
-        if (Object.keys(anonymizationResult.anonymizationMap).length > 0) {
-          // Create a new editor state with anonymized text
-          const anonymizedEditorState: JSONContent = {
-            type: "doc",
-            content: [
-              {
-                type: "paragraph",
-                content: [
-                  {
-                    type: "text",
-                    text: anonymizationResult.anonymizedText,
-                  },
-                ],
-              },
-            ],
-          };
-          editorState = anonymizedEditorState;
-        }
-      } catch (error) {
-        console.error("Anonymization failed:", error);
-        // Show error to user and optionally proceed without anonymization
-        const proceed = confirm(
-          "Anonymization service failed. Do you want to proceed without anonymization?",
-        );
-        if (!proceed) {
-          return;
+          return; // Return early, don't proceed with sending input
         }
       }
-
-      
 
       if (isInEdit) {
         void dispatch(
@@ -372,6 +404,63 @@ export function Chat() {
 
   const showScrollbar = showChatScrollbar ?? window.innerHeight > 5000;
 
+  // NEW: Handle anonymization settings dialog
+  const openAnonymizationSettings = () => {
+    dispatch(
+      setDialogMessage(
+        <AnonymizationSettings
+          onSave={(config: AnonymizationConfig) => {
+            console.log("Anonymization settings saved:", config);
+            dispatch(setShowDialog(false));
+            dispatch(setDialogMessage(undefined));
+          }}
+          onCancel={() => {
+            dispatch(setShowDialog(false));
+            dispatch(setDialogMessage(undefined));
+          }}
+        />,
+      ),
+    );
+    dispatch(setShowDialog(true));
+  };
+
+  // Import ChatHistoryItem type
+  const [cleanedHistory, setCleanedHistory] = useState<
+    ChatHistoryItemWithMessageId[]
+  >([]);
+
+  useEffect(() => {
+    const processHistory = async () => {
+      if (history.length === 0) {
+        setCleanedHistory([]);
+        return;
+      }
+
+      const processedHistory = await Promise.all(
+        history.map(async (item): Promise<ChatHistoryItemWithMessageId> => {
+          try {
+            const deanonymizedMessage =
+              await anonymizationService.deanonymizeMessage(item.message);
+            return {
+              ...item,
+              message: {
+                ...deanonymizedMessage,
+                id: item.message.id, // Preserve the original message id
+              },
+            };
+          } catch (error) {
+            console.error("Error deanonymizing message:", error);
+            return item; // Return original item if deanonymization fails
+          }
+        }),
+      );
+
+      setCleanedHistory(processedHistory);
+    };
+
+    processHistory();
+  }, [history]);
+
   return (
     <>
       {!!showSessionTabs && !isInEdit && <TabBar ref={tabsRef} />}
@@ -379,14 +468,14 @@ export function Chat() {
 
       <StepsDiv
         ref={stepsDivRef}
-        className={`overflow-y-scroll pt-[8px] ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"} ${history.length > 0 ? "flex-1" : ""}`}
+        className={`overflow-y-scroll pt-[8px] ${showScrollbar ? "thin-scrollbar" : "no-scrollbar"} ${cleanedHistory.length > 0 ? "flex-1" : ""}`}
       >
         {highlights}
-        {history.map((item, index: number) => (
+        {cleanedHistory.map((item, index: number) => (
           <div
             key={item.message.id}
             style={{
-              minHeight: index === history.length - 1 ? "200px" : 0,
+              minHeight: index === cleanedHistory.length - 1 ? "200px" : 0,
             }}
           >
             <ErrorBoundary
@@ -420,7 +509,7 @@ export function Chat() {
                         key={i}
                         toolCallState={item.toolCallState!}
                         toolCall={toolCall}
-                        output={history[index + 1]?.contextItems}
+                        output={cleanedHistory[index + 1]?.contextItems}
                         historyIndex={index}
                       />
                     );
@@ -431,8 +520,8 @@ export function Chat() {
                   content={renderChatMessage(item.message)}
                   redactedThinking={item.message.redactedThinking}
                   index={index}
-                  prevItem={index > 0 ? history[index - 1] : null}
-                  inProgress={index === history.length - 1}
+                  prevItem={index > 0 ? cleanedHistory[index - 1] : null}
+                  inProgress={index === cleanedHistory.length - 1}
                   signature={item.message.signature}
                 />
               ) : (
@@ -451,7 +540,7 @@ export function Chat() {
                   >
                     <StepContainer
                       index={index}
-                      isLast={index === history.length - 1}
+                      isLast={index === cleanedHistory.length - 1}
                       item={item}
                     />
                   </TimelineItem>
@@ -478,7 +567,7 @@ export function Chat() {
         >
           <div className="flex flex-row items-center justify-between pb-1 pl-0.5 pr-2">
             <div className="xs:inline hidden">
-              {history.length === 0 && lastSessionId && !isInEdit && (
+              {cleanedHistory.length === 0 && lastSessionId && !isInEdit && (
                 <div className="xs:inline hidden">
                   <NewSessionButton
                     onClick={async () => {
@@ -496,9 +585,19 @@ export function Chat() {
                 </div>
               )}
             </div>
+            <div className="xs:inline hidden">
+              <button
+                onClick={openAnonymizationSettings}
+                className="flex items-center gap-2 rounded px-2 py-1 text-xs transition-colors hover:bg-gray-700"
+                title="Anonymization Settings"
+              >
+                <Cog6ToothIcon className="h-3 w-3" />
+                <span>Privacy</span>
+              </button>
+            </div>
           </div>
           {!hasDismissedExploreDialog && <ExploreDialogWatcher />}
-          {history.length === 0 && (
+          {cleanedHistory.length === 0 && (
             <EmptyChatBody showOnboardingCard={onboardingCard.show} />
           )}
         </div>

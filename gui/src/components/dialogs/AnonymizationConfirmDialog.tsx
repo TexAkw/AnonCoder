@@ -1,6 +1,8 @@
 import styled from "styled-components";
 import { defaultBorderRadius, lightGray, vscForeground } from "..";
-import { AnonymizationResult } from "../../util/anonymization";
+import { AnonymizationResult } from "../../../../custom_proxy/utils/anonymization";
+import { AnoniaApiClient } from "../../util/anoniaApiClient";
+import { useSupabase } from "../../util/supabase-client";
 
 const DialogContainer = styled.div`
   max-width: 600px;
@@ -95,9 +97,22 @@ export default function AnonymizationConfirmDialog({
   onConfirm,
   onCancel,
 }: AnonymizationConfirmDialogProps) {
+  const supabaseClient = useSupabase();
   const { originalText, anonymizedText, anonymizationMap } =
     anonymizationResult;
   const hasChanges = Object.keys(anonymizationMap).length > 0;
+
+  const handleAnalyzeMessage = async (message: string) => {
+    if (!supabaseClient || !("auth" in supabaseClient)) {
+      console.warn("Supabase client not available");
+      return;
+    }
+    const result = await AnoniaApiClient.analyzeMessage(
+      { message },
+      supabaseClient,
+    );
+    // Handle result...
+  };
 
   return (
     <DialogContainer>
