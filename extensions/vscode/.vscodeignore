@@ -11,6 +11,7 @@ vsc-extension-quickstart.md
 **/*.ts
 **/.env
 **/env
+**/*.env.*
 node_modules/**
 
 **/.pytest_cache
@@ -26,3 +27,4 @@ e2e
 server/exe/**
 !out/node_modules/**
 !node_modules/@vscode/ripgrep/bin/rg
+node_modules/core

@@ -1,0 +1,120 @@
+[
+  {
+    "en": "Location",
+    "fr": "Localisation",
+    "bgColor": "bg-[#FFF1F2]",
+    "textColor": "text-[#E11D48]",
+    "labels": ["address", "location", "gps coordinates"]
+  },
+  {
+    "en": "Personal",
+    "fr": "Personnelles",
+    "bgColor": "bg-[#FDF4FF]",
+    "textColor": "text-[#C026D3]",
+    "labels": [
+      "person",
+      "email",
+      "phone number",
+      "identity card",
+      "passport",
+      "visa",
+      "driver license",
+      "student id"
+    ]
+  },
+  {
+    "en": "Professional",
+    "fr": "Professionnelles",
+    "bgColor": "bg-[#F0FDFA]",
+    "textColor": "text-[#0891B2]",
+    "labels": [
+      "organization",
+      "company",
+      "vat number",
+      "company registration",
+      "siret",
+      "siren",
+      "registration number",
+      "medical license",
+      "rpps"
+    ]
+  },
+  {
+    "en": "Digital",
+    "fr": "Numériques",
+    "bgColor": "bg-[#EFF6FF]",
+    "textColor": "text-[#2563EB]",
+    "labels": [
+      "api key",
+      "api token",
+      "oauth token",
+      "bearer token",
+      "jwt token",
+      "authentication token",
+      "secret key",
+      "private key",
+      "encryption key",
+      "git token",
+      "username",
+      "password",
+      "uuid",
+      "cookie id",
+      "ip address",
+      "port number",
+      "mac address",
+      "wallet address",
+      "bitcoin"
+    ]
+  },
+  {
+    "en": "Financial",
+    "fr": "Financières",
+    "bgColor": "bg-[#F5F3FF]",
+    "textColor": "text-[#7C3AED]",
+    "labels": [
+      "credit card",
+      "bank account",
+      "cvv",
+      "security code",
+      "expiration date",
+      "pin code",
+      "bic",
+      "iban",
+      "rib"
+    ]
+  },
+  {
+    "en": "Health",
+    "fr": "Santé",
+    "bgColor": "bg-[#F0FDF4]",
+    "textColor": "text-[#16A34A]",
+    "labels": [
+      "health insurance",
+      "social security",
+      "health card",
+      "disease",
+      "medical condition",
+      "medication"
+    ]
+  },
+  {
+    "en": "Sensitive",
+    "fr": "Sensibles",
+    "bgColor": "bg-[#FEFCE8]",
+    "textColor": "text-[#D97706]",
+    "labels": [
+      "sexual orientation",
+      "ethnicity",
+      "religion",
+      "political affiliation",
+      "union membership"
+    ]
+  },
+  {
+    "en": "Custom",
+    "fr": "Personnalisées",
+    "bgColor": "bg-[#F8FAFC]",
+    "textColor": "text-[#475569]",
+    "labels": []
+  }
+]
